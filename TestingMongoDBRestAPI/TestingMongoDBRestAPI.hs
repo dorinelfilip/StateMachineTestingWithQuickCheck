@@ -2,14 +2,29 @@
 {-# LANGUAGE ExtendedDefaultRules #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-import Test.QuickCheck
-    ( Args(maxSuccess), Property, stdArgs, quickCheckWith )
-import Test.QuickCheck.Monadic ( assert, monadicIO, run )
-import qualified Data.Set as Set ( fromList )
-import Control.Applicative ( Applicative((<*>)), (<$>) )
-import Control.Monad ( MonadPlus(mzero) )
-import Network.HTTP.Conduit ( simpleHttp )
-import qualified Data.ByteString.Lazy as L ( ByteString )
+import Test.QuickCheck         ( Arbitrary
+                               , Args
+                               , Gen
+                               , Property
+                               , arbitrary
+                               , choose
+                               , frequency
+                               , maxSuccess
+                               , quickCheckWith
+                               , shrink
+                               , stdArgs
+                               , vectorOf
+                               )
+import Test.QuickCheck.Monadic ( assert
+                               , monadicIO
+                               , run
+                               )
+
+import qualified Data.Set as Set
+import Control.Applicative
+import Control.Monad
+import Network.HTTP.Conduit    ( simpleHttp )
+import qualified Data.ByteString.Lazy as L
 import Database.MongoDB
     ( Select(select),
       close,
@@ -20,10 +35,11 @@ import Database.MongoDB
       host,
       connect,
       (=:) )
-import Control.Monad.Trans ()
-import Data.Aeson ( Value(Object), FromJSON(..), (.:), decode )
-import Data.Text ()
-import Data.Maybe ( fromJust )
+import Control.Monad.Trans (liftIO)
+import Data.Aeson
+import Data.Text hiding (map)
+import Data.Maybe
+
 
 data RowListElement = RowListElement { id :: Value, abc :: Int } deriving Show
 data RootJSONElement = RootJSONElement { offset :: Value, rows :: [RowListElement], total_rows :: Value, query :: Value, milis :: Value } deriving Show
@@ -41,9 +57,9 @@ instance FromJSON RootJSONElement where
 
 getIdsFromJSONString :: L.ByteString -> [Int]
 getIdsFromJSONString s = result where
-	decodedInput = decode s :: Maybe RootJSONElement
-	xRowsList = rows $ fromJust decodedInput
-	result = Prelude.map abc xRowsList
+  decodedInput = decode s :: Maybe RootJSONElement
+  xRowsList = rows $ fromJust decodedInput
+  result = Prelude.map abc xRowsList
 
 
 addInDatabase list = do
@@ -71,9 +87,7 @@ myInsertAbc list = insertMany "randids" $ map (\x -> ["abc" =: x])  list
 
 insertIds list = myInsertAbc list
 
-
---prorietate :: [Int] -> Property
-checkProp list = do
+checkPropAux list = do
   _ <- clearDatabase
   _ <- addInDatabase $ 1 : list
   let inputSet = Set.fromList (1 : list)
@@ -81,19 +95,17 @@ checkProp list = do
   restingJSON <- simpleHttp "http://127.0.0.1:28017/qctest/randids/"
   let restList = getIdsFromJSONString restingJSON
   let restingSet = Set.fromList  (1 : restList)
-  --print restingSet
-  --_ <- clearDatabase
   return $ inputSet == restingSet
 
 
-checkProp2 :: [Int] -> Property
-checkProp2 list = monadicIO $ do
+checkProp :: [Int] -> Property
+checkProp list = monadicIO $ do
   isOk <- run $ do
-    (checkProp list)
+    (checkPropAux list)
   assert isOk
 
 customArgs :: Args
 customArgs = ( stdArgs { maxSuccess = 1000000 } )
 
 main :: IO ()
-main = quickCheckWith customArgs checkProp2
+main = quickCheckWith customArgs checkProp
